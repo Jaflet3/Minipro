@@ -51,13 +51,17 @@ def calculate_crack_severity(image_path):
 
 
 def create_pdf_report(image_path, severity_score, severity_category, report_path="report.pdf"):
-    """Generate a PDF report with the image and severity score."""
+    """Generate a PDF report with the image and severity score (safe for FPDF)."""
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Arial", size=16)
+
+    # Remove emojis for PDF
+    category_text = severity_category.replace("🟢", "Low").replace("🟡", "Medium").replace("🔴", "High")
+
     pdf.cell(200, 10, txt="Crack Detection Report", ln=True, align="C")
     pdf.ln(10)
-    pdf.cell(200, 10, txt=f"Severity Score: {severity_score}% ({severity_category})", ln=True)
+    pdf.cell(200, 10, txt=f"Severity Score: {severity_score}% ({category_text})", ln=True)
     pdf.ln(10)
     pdf.image(image_path, x=50, w=100)
     pdf.output(report_path)
@@ -115,6 +119,7 @@ if uploaded_file:
     else:
         sev_category = "High 🔴"
 
+    # Display severity
     st.metric(label="Crack Severity Score", value=f"{severity}%", delta=f"{sev_category}")
 
     # Show progress bar
