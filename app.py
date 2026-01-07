@@ -7,14 +7,16 @@ import os
 import gdown
 from tensorflow.keras.models import load_model
 from fpdf import FPDF
+import pandas as pd
+import matplotlib.pyplot as plt
 import warnings
 
 warnings.filterwarnings("ignore", category=UserWarning)
 
 st.set_page_config(page_title="🛠️ Crack Detection Dashboard", layout="wide")
-st.title("🛠️ Image-based Crack Detection with Dashboard")
+st.title("🛠️ Enhanced Image-based Crack Detection Dashboard")
 st.markdown(
-    "Upload one or more images to detect cracks, calculate severity, and download a report."
+    "Upload images to detect cracks, calculate severity, length, and download a detailed report."
 )
 
 # -------------------------
@@ -29,13 +31,18 @@ model = load_model(MODEL_PATH, compile=False)
 
 # -------------------------
 # Functions
-def calculate_crack_severity(image_path):
+def calculate_crack_severity(image_path, threshold_val=127):
     img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
-    _, thresh = cv2.threshold(img, 127, 255, cv2.THRESH_BINARY_INV)
+    _, thresh = cv2.threshold(img, threshold_val, 255, cv2.THRESH_BINARY_INV)
     crack_pixels = np.sum(thresh == 255)
     total_pixels = thresh.size
     severity_score = (crack_pixels / total_pixels) * 100
     return round(severity_score, 2), thresh
+
+def crack_length_count(thresh):
+    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    total_length = sum([cv2.arcLength(c, False) for c in contours])
+    return len(contours), round(total_length, 2)
 
 def predict_crack(image_path):
     img = Image.open(image_path).convert("RGB")
@@ -47,32 +54,49 @@ def predict_crack(image_path):
     pred = model.predict(img_array)
     return float(pred[0][0])
 
-def create_pdf_report_batch(image_paths, severities, categories, report_path="report.pdf"):
-    pdf = FPDF()
-    pdf.set_auto_page_break(auto=True, margin=15)
-    pdf.add_page()
-    pdf.set_font("Arial", size=16)
-    pdf.cell(200, 10, txt="Crack Detection Report", ln=True, align="C")
-    pdf.ln(10)
-
-    for img_path, severity, category in zip(image_paths, severities, categories):
-        category_text = category.replace("🟢", "Low").replace("🟡", "Medium").replace("🔴", "High")
-        pdf.cell(200, 10, txt=f"Severity Score: {severity}% ({category_text})", ln=True)
-        pdf.ln(5)
-        pdf.image(img_path, x=50, w=100)
-        pdf.ln(10)
-    pdf.output(report_path)
-    return report_path
-
 def overlay_cracks(image_path, thresh):
     img = cv2.imread(image_path)
     overlay = img.copy()
-    # Slightly thicker red overlay for subtle cracks
     kernel = np.ones((3,3), np.uint8)
     dilated = cv2.dilate(thresh, kernel, iterations=1)
-    overlay[dilated==255] = [0,0,255]  # Red overlay for cracks
+    overlay[dilated==255] = [0,0,255]  # Red overlay
     combined = cv2.addWeighted(img, 0.7, overlay, 0.3, 0)
     return combined
+
+def overlay_heatmap(image_path, thresh):
+    img = cv2.imread(image_path)
+    heatmap = cv2.applyColorMap(thresh, cv2.COLORMAP_JET)
+    combined = cv2.addWeighted(img, 0.7, heatmap, 0.3, 0)
+    return combined
+
+def create_pdf_report_batch(image_paths, severities, categories, counts, lengths, report_path="report.pdf"):
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=15)
+
+    # Summary page
+    pdf.add_page()
+    pdf.set_font("Arial", 'B', 16)
+    pdf.cell(200, 10, txt="Crack Detection Report - Summary", ln=True, align="C")
+    pdf.ln(10)
+    pdf.set_font("Arial", size=12)
+    total_images = len(image_paths)
+    avg_severity = round(sum(severities)/total_images, 2)
+    pdf.cell(200, 8, txt=f"Total Images: {total_images}", ln=True)
+    pdf.cell(200, 8, txt=f"Average Severity: {avg_severity}%", ln=True)
+    pdf.ln(5)
+
+    # Per image details
+    for idx, img_path in enumerate(image_paths):
+        pdf.add_page()
+        pdf.set_font("Arial", 'B', 14)
+        pdf.cell(200, 10, txt=f"Image: {os.path.basename(img_path)}", ln=True)
+        pdf.set_font("Arial", size=12)
+        pdf.cell(200, 8, txt=f"Severity: {severities[idx]}% ({categories[idx]})", ln=True)
+        pdf.cell(200, 8, txt=f"Crack Count: {counts[idx]}, Total Length: {lengths[idx]}", ln=True)
+        pdf.ln(5)
+        pdf.image(img_path, x=50, w=100)
+    pdf.output(report_path)
+    return report_path
 
 # -------------------------
 # Streamlit UI
@@ -80,11 +104,15 @@ uploaded_files = st.file_uploader(
     "Upload one or more images", type=["jpg","png","jpeg"], accept_multiple_files=True
 )
 
+threshold_val = st.slider("Adjust binary threshold for crack detection:", 50, 200, 127)
+
 if uploaded_files:
     results = []
     temp_image_paths = []
     severities = []
     categories = []
+    crack_counts = []
+    crack_lengths = []
 
     for uploaded_file in uploaded_files:
         image = Image.open(uploaded_file)
@@ -92,11 +120,12 @@ if uploaded_files:
         image.save(temp_path)
         temp_image_paths.append(temp_path)
 
-        # Prediction
+        # Prediction + severity
         prediction = predict_crack(temp_path)
-        severity, thresh = calculate_crack_severity(temp_path)
+        severity, thresh = calculate_crack_severity(temp_path, threshold_val)
+        count, total_length = crack_length_count(thresh)
 
-        # Adjust detection: small cracks now detected
+        # Detection text
         if prediction >= 0.5 or severity > 2.0:
             detect_text = "Crack Detected ⚠️"
         else:
@@ -112,34 +141,75 @@ if uploaded_files:
 
         severities.append(severity)
         categories.append(sev_category)
+        crack_counts.append(count)
+        crack_lengths.append(total_length)
 
-        # Overlay cracks
+        # Overlays
         overlay_img = overlay_cracks(temp_path, thresh)
+        heatmap_img = overlay_heatmap(temp_path, thresh)
         overlay_path = f"overlay_{uploaded_file.name}"
+        heatmap_path = f"heatmap_{uploaded_file.name}"
         cv2.imwrite(overlay_path, overlay_img)
+        cv2.imwrite(heatmap_path, heatmap_img)
 
         results.append({
             "Image": uploaded_file.name,
             "Prediction": detect_text,
-            "Severity": f"{severity}%",
+            "Severity": severity,
             "Category": sev_category,
-            "Overlay": overlay_path
+            "Crack Count": count,
+            "Total Length": total_length,
+            "Overlay": overlay_path,
+            "Heatmap": heatmap_path
         })
 
     # -------------------------
-    # Display results in dashboard
+    # Display interactive table
     st.subheader("📝 Results Dashboard")
+    df_display = pd.DataFrame(results)[['Image','Prediction','Severity','Category','Crack Count','Total Length']]
+    st.dataframe(df_display)
+
+    # Display images side by side
+    st.subheader("📷 Image Overlays")
     for res in results:
-        st.write(f"**{res['Image']}** - {res['Prediction']} - Severity: {res['Severity']} ({res['Category']})")
-        st.image(res['Overlay'], width=400)
-        st.progress(min(int(float(res['Severity'].replace('%',''))), 100))
+        st.write(f"**{res['Image']}** - {res['Prediction']} - Severity: {res['Severity']}% ({res['Category']})")
+        col1, col2, col3 = st.columns(3)
+        col1.image(res['Image'], caption="Original", use_column_width=True)
+        col2.image(res['Overlay'], caption="Overlay", use_column_width=True)
+        col3.image(res['Heatmap'], caption="Heatmap", use_column_width=True)
 
     # -------------------------
-    # Download combined PDF report
-    report_file = create_pdf_report_batch(temp_image_paths, severities, categories)
+    # Severity distribution chart
+    st.subheader("📊 Severity Analysis")
+    fig, ax = plt.subplots(1,2, figsize=(10,4))
+    # Bar chart - severity values
+    ax[0].bar([r['Image'] for r in results], severities, color='orange')
+    ax[0].set_ylabel("Severity %")
+    ax[0].set_xticklabels([r['Image'] for r in results], rotation=45, ha='right')
+    ax[0].set_title("Severity per Image")
+    # Pie chart - severity categories
+    cat_counts = pd.Series(categories).value_counts()
+    ax[1].pie(cat_counts, labels=cat_counts.index, autopct='%1.1f%%', startangle=140)
+    ax[1].set_title("Severity Category Distribution")
+    st.pyplot(fig)
+
+    # -------------------------
+    # Download CSV
+    df_csv = pd.DataFrame(results)[['Image','Prediction','Severity','Category','Crack Count','Total Length']]
+    csv = df_csv.to_csv(index=False).encode('utf-8')
+    st.download_button(
+        label="📊 Download CSV Report",
+        data=csv,
+        file_name="Crack_Report.csv",
+        mime="text/csv"
+    )
+
+    # -------------------------
+    # Download PDF report
+    report_file = create_pdf_report_batch(temp_image_paths, severities, categories, crack_counts, crack_lengths)
     with open(report_file, "rb") as f:
         st.download_button(
-            label="📄 Download Combined Report",
+            label="📄 Download PDF Report",
             data=f,
             file_name="Crack_Report.pdf",
             mime="application/pdf"
