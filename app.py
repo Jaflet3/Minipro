@@ -20,9 +20,7 @@ warnings.filterwarnings("ignore", category=UserWarning)
 st.set_page_config(page_title="🛠️ Crack Detection", layout="centered")
 st.title("🛠️ Image-based Crack Detection")
 st.markdown(
-    """
-    Upload an image to detect cracks, calculate severity, and download a PDF report.
-    """
+    "Upload an image to detect cracks, calculate severity, and download a PDF report."
 )
 
 # -------------------------
@@ -52,14 +50,14 @@ def calculate_crack_severity(image_path):
     return round(severity_score, 2)
 
 
-def create_pdf_report(image_path, severity_score, report_path="report.pdf"):
+def create_pdf_report(image_path, severity_score, severity_category, report_path="report.pdf"):
     """Generate a PDF report with the image and severity score."""
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Arial", size=16)
     pdf.cell(200, 10, txt="Crack Detection Report", ln=True, align="C")
     pdf.ln(10)
-    pdf.cell(200, 10, txt=f"Severity Score: {severity_score}%", ln=True)
+    pdf.cell(200, 10, txt=f"Severity Score: {severity_score}% ({severity_category})", ln=True)
     pdf.ln(10)
     pdf.image(image_path, x=50, w=100)
     pdf.output(report_path)
@@ -97,6 +95,7 @@ if uploaded_file:
     temp_path = "temp_image.png"
     image.save(temp_path)
 
+    # Predict crack
     with st.spinner("🔍 Detecting cracks..."):
         prediction = predict_crack(temp_path)
 
@@ -105,10 +104,24 @@ if uploaded_file:
     else:
         st.success("✅ No Crack Detected")
 
+    # Severity score
     severity = calculate_crack_severity(temp_path)
-    st.metric(label="Crack Severity Score", value=f"{severity}%")
 
-    report_file = create_pdf_report(temp_path, severity)
+    # Categorize severity
+    if severity <= 10:
+        sev_category = "Low 🟢"
+    elif severity <= 30:
+        sev_category = "Medium 🟡"
+    else:
+        sev_category = "High 🔴"
+
+    st.metric(label="Crack Severity Score", value=f"{severity}%", delta=f"{sev_category}")
+
+    # Show progress bar
+    st.progress(min(int(severity), 100))
+
+    # Download PDF report
+    report_file = create_pdf_report(temp_path, severity, sev_category)
     with open(report_file, "rb") as f:
         st.download_button(
             label="📄 Download Report",
