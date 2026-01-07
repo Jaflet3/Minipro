@@ -69,7 +69,11 @@ def overlay_heatmap(image_path, thresh):
     combined = cv2.addWeighted(img, 0.7, heatmap, 0.3, 0)
     return combined
 
-def create_pdf_report_batch(image_paths, severities, categories, counts, lengths, report_path="report.pdf"):
+# Convert OpenCV BGR -> RGB
+def cv2_to_rgb(img):
+    return cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
+def create_pdf_report_batch(images, severities, categories, counts, lengths, report_path="report.pdf"):
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=15)
 
@@ -79,22 +83,26 @@ def create_pdf_report_batch(image_paths, severities, categories, counts, lengths
     pdf.cell(200, 10, txt="Crack Detection Report - Summary", ln=True, align="C")
     pdf.ln(10)
     pdf.set_font("Arial", size=12)
-    total_images = len(image_paths)
+    total_images = len(images)
     avg_severity = round(sum(severities)/total_images, 2)
     pdf.cell(200, 8, txt=f"Total Images: {total_images}", ln=True)
     pdf.cell(200, 8, txt=f"Average Severity: {avg_severity}%", ln=True)
     pdf.ln(5)
 
     # Per image details
-    for idx, img_path in enumerate(image_paths):
+    for idx, img in enumerate(images):
+        temp_path = f"pdf_temp_{idx}.jpg"
+        img.save(temp_path)  # Save PIL image temporarily
         pdf.add_page()
         pdf.set_font("Arial", 'B', 14)
-        pdf.cell(200, 10, txt=f"Image: {os.path.basename(img_path)}", ln=True)
+        pdf.cell(200, 10, txt=f"Image {idx+1}", ln=True)
         pdf.set_font("Arial", size=12)
         pdf.cell(200, 8, txt=f"Severity: {severities[idx]}% ({categories[idx]})", ln=True)
         pdf.cell(200, 8, txt=f"Crack Count: {counts[idx]}, Total Length: {lengths[idx]}", ln=True)
         pdf.ln(5)
-        pdf.image(img_path, x=50, w=100)
+        pdf.image(temp_path, x=50, w=100)
+        os.remove(temp_path)
+
     pdf.output(report_path)
     return report_path
 
@@ -126,10 +134,7 @@ if uploaded_files:
         count, total_length = crack_length_count(thresh)
 
         # Detection text
-        if prediction >= 0.5 or severity > 2.0:
-            detect_text = "Crack Detected ⚠️"
-        else:
-            detect_text = "No Crack ✅"
+        detect_text = "Crack Detected ⚠️" if prediction >= 0.5 or severity > 2.0 else "No Crack ✅"
 
         # Categorize severity
         if severity <= 10:
@@ -147,47 +152,43 @@ if uploaded_files:
         # Overlays
         overlay_img = overlay_cracks(temp_path, thresh)
         heatmap_img = overlay_heatmap(temp_path, thresh)
-        overlay_path = f"overlay_{uploaded_file.name}"
-        heatmap_path = f"heatmap_{uploaded_file.name}"
-        cv2.imwrite(overlay_path, overlay_img)
-        cv2.imwrite(heatmap_path, heatmap_img)
 
         results.append({
-            "Image": uploaded_file.name,
+            "Image": image,  # PIL Image
+            "Image_Name": uploaded_file.name,
             "Prediction": detect_text,
             "Severity": severity,
             "Category": sev_category,
             "Crack Count": count,
             "Total Length": total_length,
-            "Overlay": overlay_path,
-            "Heatmap": heatmap_path
+            "Overlay": overlay_img,
+            "Heatmap": heatmap_img
         })
 
     # -------------------------
     # Display interactive table
     st.subheader("📝 Results Dashboard")
-    df_display = pd.DataFrame(results)[['Image','Prediction','Severity','Category','Crack Count','Total Length']]
+    df_display = pd.DataFrame(results)[['Image_Name','Prediction','Severity','Category','Crack Count','Total Length']]
     st.dataframe(df_display)
 
     # Display images side by side
     st.subheader("📷 Image Overlays")
     for res in results:
-        st.write(f"**{res['Image']}** - {res['Prediction']} - Severity: {res['Severity']}% ({res['Category']})")
+        st.write(f"**{res['Image_Name']}** - {res['Prediction']} - Severity: {res['Severity']}% ({res['Category']})")
         col1, col2, col3 = st.columns(3)
         col1.image(res['Image'], caption="Original", use_column_width=True)
-        col2.image(res['Overlay'], caption="Overlay", use_column_width=True)
-        col3.image(res['Heatmap'], caption="Heatmap", use_column_width=True)
+        col2.image(cv2_to_rgb(res['Overlay']), caption="Overlay", use_column_width=True)
+        col3.image(cv2_to_rgb(res['Heatmap']), caption="Heatmap", use_column_width=True)
 
     # -------------------------
     # Severity distribution chart
     st.subheader("📊 Severity Analysis")
     fig, ax = plt.subplots(1,2, figsize=(10,4))
-    # Bar chart - severity values
-    ax[0].bar([r['Image'] for r in results], severities, color='orange')
+    ax[0].bar([r['Image_Name'] for r in results], severities, color='orange')
     ax[0].set_ylabel("Severity %")
-    ax[0].set_xticklabels([r['Image'] for r in results], rotation=45, ha='right')
+    ax[0].set_xticklabels([r['Image_Name'] for r in results], rotation=45, ha='right')
     ax[0].set_title("Severity per Image")
-    # Pie chart - severity categories
+
     cat_counts = pd.Series(categories).value_counts()
     ax[1].pie(cat_counts, labels=cat_counts.index, autopct='%1.1f%%', startangle=140)
     ax[1].set_title("Severity Category Distribution")
@@ -195,7 +196,7 @@ if uploaded_files:
 
     # -------------------------
     # Download CSV
-    df_csv = pd.DataFrame(results)[['Image','Prediction','Severity','Category','Crack Count','Total Length']]
+    df_csv = pd.DataFrame(results)[['Image_Name','Prediction','Severity','Category','Crack Count','Total Length']]
     csv = df_csv.to_csv(index=False).encode('utf-8')
     st.download_button(
         label="📊 Download CSV Report",
@@ -206,7 +207,7 @@ if uploaded_files:
 
     # -------------------------
     # Download PDF report
-    report_file = create_pdf_report_batch(temp_image_paths, severities, categories, crack_counts, crack_lengths)
+    report_file = create_pdf_report_batch([r['Image'] for r in results], severities, categories, crack_counts, crack_lengths)
     with open(report_file, "rb") as f:
         st.download_button(
             label="📄 Download PDF Report",
