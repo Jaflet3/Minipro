@@ -9,14 +9,15 @@ from tensorflow.keras.models import load_model
 from fpdf import FPDF
 import pandas as pd
 import matplotlib.pyplot as plt
+from gtts import gTTS
 import warnings
 
 warnings.filterwarnings("ignore", category=UserWarning)
 
 st.set_page_config(page_title="🛠️ Crack Detection Dashboard", layout="wide")
-st.title("🛠️ Enhanced Image-based Crack Detection Dashboard")
+st.title("🛠️ Enhanced Image-based Crack Detection Dashboard with Voice Feedback")
 st.markdown(
-    "Upload images to detect cracks, calculate severity, length, and download a detailed report."
+    "Upload images to detect cracks, calculate severity, length, get voice alerts, and download detailed reports."
 )
 
 # -------------------------
@@ -73,7 +74,12 @@ def overlay_heatmap(image_path, thresh):
 def cv2_to_rgb(img):
     return cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
-# -------------------------
+# Voice feedback
+def speak_detection(text, filename="detection.mp3"):
+    tts = gTTS(text=text, lang="en")
+    tts.save(filename)
+    return filename
+
 # PDF Report
 def create_pdf_report_batch(images, severities, categories, counts, lengths, detections, report_path="report.pdf"):
     pdf = FPDF()
@@ -100,7 +106,7 @@ def create_pdf_report_batch(images, severities, categories, counts, lengths, det
         pdf.cell(200, 10, txt=f"Image {idx+1}", ln=True)
         pdf.set_font("Arial", size=12)
 
-        # Replace emojis for PDF
+        # Remove emojis for PDF
         category_text = categories[idx].replace("🟢", "Low").replace("🟡", "Medium").replace("🔴", "High")
         detect_text_pdf = detections[idx].replace("⚠️", "Crack Detected").replace("✅", "No Crack")
 
@@ -144,6 +150,10 @@ if uploaded_files:
 
         # Detection text
         detect_text = "Crack Detected ⚠️" if prediction >= 0.5 or severity > 2.0 else "No Crack ✅"
+
+        # Voice feedback (remove emojis for speech)
+        audio_file = speak_detection(detect_text.replace("⚠️","").replace("✅",""))
+        st.audio(audio_file, format='audio/mp3')
 
         # Categorize severity
         if severity <= 10:
@@ -233,4 +243,4 @@ if uploaded_files:
             mime="application/pdf"
         )
 
-    st.success("✅ Analysis Complete!")
+    st.success("✅ Analysis Complete! Voice alerts played for each image.")
