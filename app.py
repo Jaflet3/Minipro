@@ -18,7 +18,7 @@ warnings.filterwarnings("ignore")
 # -------------------------
 # Streamlit page setup
 st.set_page_config(page_title="🛠️ Crack Detection Dashboard", layout="wide")
-st.title("🛠️ Image-based Crack Detection Dashboard")
+st.title("🛠️ Image-based Crack Detection ")
 st.markdown(
     "Upload images to detect cracks, calculate severity, overlay heatmaps, get voice alerts, and download reports."
 )
