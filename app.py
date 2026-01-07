@@ -9,33 +9,31 @@ from tensorflow.keras.models import load_model
 from fpdf import FPDF
 import pandas as pd
 import matplotlib.pyplot as plt
+import seaborn as sns
 from gtts import gTTS
 import warnings
 
 warnings.filterwarnings("ignore")
 
+# -------------------------
+# Streamlit page setup
 st.set_page_config(page_title="🛠️ Crack Detection Dashboard", layout="wide")
-st.title("🛠️ Image-based Crack Detection Dashboard with Voice Feedback")
+st.title("🛠️ Image-based Crack Detection Dashboard")
 st.markdown(
     "Upload images to detect cracks, calculate severity, overlay heatmaps, get voice alerts, and download reports."
 )
 
 # -------------------------
-# -------------------------
-# Utility Functions
-# -------------------------
-# Download model if not exists
+# Utility functions
 def download_model(url: str, path: str):
     if not os.path.exists(path):
         with st.spinner("📥 Downloading model..."):
             gdown.download(url, path, quiet=False)
     return path
 
-# Load Keras model
 def load_crack_model(path: str):
     return load_model(path, compile=False)
 
-# Prediction and severity calculation
 def predict_crack(image_path: str, model) -> float:
     img = Image.open(image_path).convert("RGB")
     h, w = model.input_shape[1], model.input_shape[2]
@@ -54,7 +52,6 @@ def crack_count_length(thresh):
     total_length = sum(cv2.arcLength(c, False) for c in contours)
     return len(contours), round(total_length, 2)
 
-# Overlay functions
 def overlay_cracks(image_path: str, thresh):
     img = cv2.imread(image_path)
     kernel = np.ones((3,3), np.uint8)
@@ -71,18 +68,16 @@ def overlay_heatmap(image_path: str, thresh):
 def cv2_to_rgb(img):
     return cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
-# Voice feedback
 def speak(text: str, filename="detection.mp3") -> str:
     tts = gTTS(text=text, lang="en")
     tts.save(filename)
     return filename
 
-# PDF Report
 def generate_pdf_report(images, severities, categories, counts, lengths, detections, path="report.pdf"):
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=15)
 
-    # Summary
+    # Summary page
     pdf.add_page()
     pdf.set_font("Arial", 'B', 16)
     pdf.cell(200, 10, "Crack Detection Report - Summary", ln=True, align="C")
@@ -128,12 +123,11 @@ if uploaded_files:
     results = []
 
     for uploaded_file in uploaded_files:
-        # Save image temporarily
         img = Image.open(uploaded_file)
         temp_path = f"temp_{uploaded_file.name}"
         img.save(temp_path)
 
-        # Prediction & severity
+        # Predictions
         pred = predict_crack(temp_path, model)
         severity, thresh = calculate_crack_severity(temp_path, threshold_val)
         count, length = crack_count_length(thresh)
@@ -143,7 +137,7 @@ if uploaded_files:
         audio_file = speak(detect_text.replace("⚠️","").replace("✅",""))
         st.audio(audio_file, format='audio/mp3')
 
-        # Categorize severity
+        # Severity category
         if severity <= 10:
             category = "Low 🟢"
         elif severity <= 30:
@@ -167,11 +161,12 @@ if uploaded_files:
         })
 
     # -------------------------
-    # Display results
+    # Display results table
     st.subheader("📝 Results Dashboard")
     df_display = pd.DataFrame(results)[['Image_Name','Prediction','Severity','Category','Crack Count','Total Length']]
     st.dataframe(df_display)
 
+    # Display image overlays
     st.subheader("📷 Image Overlays")
     for res in results:
         st.write(f"**{res['Image_Name']}** - {res['Prediction']} - Severity: {res['Severity']}% ({res['Category']})")
@@ -181,21 +176,33 @@ if uploaded_files:
         col3.image(cv2_to_rgb(res['Heatmap']), caption="Heatmap", use_column_width=True)
 
     # -------------------------
-    # Severity charts
+    # Improved severity charts
     st.subheader("📊 Severity Analysis")
-    fig, ax = plt.subplots(1,2, figsize=(10,4))
-    ax[0].bar([r['Image_Name'] for r in results], [r['Severity'] for r in results], color='orange')
-    ax[0].set_ylabel("Severity %")
-    ax[0].set_xticklabels([r['Image_Name'] for r in results], rotation=45, ha='right')
-    ax[0].set_title("Severity per Image")
+    severity_values = [r['Severity'] for r in results]
+    image_names = [r['Image_Name'] for r in results]
+    categories_clean = [r['Category'].replace("🟢","Low").replace("🟡","Medium").replace("🔴","High") for r in results]
 
-    cat_counts = pd.Series([r['Category'] for r in results]).value_counts()
-    ax[1].pie(cat_counts, labels=cat_counts.index, autopct='%1.1f%%', startangle=140)
+    fig, ax = plt.subplots(1,2, figsize=(14,5))
+
+    # Bar chart
+    sns.barplot(x=image_names, y=severity_values, palette="Oranges", ax=ax[0])
+    ax[0].set_ylabel("Severity (%)")
+    ax[0].set_xlabel("Image Name")
+    ax[0].set_title("Severity per Image")
+    ax[0].set_ylim(0, max(severity_values)*1.2 if severity_values else 10)
+    for i, v in enumerate(severity_values):
+        ax[0].text(i, v + 0.1, f"{v:.2f}%", ha='center', fontweight='bold')
+
+    # Pie chart
+    cat_counts = pd.Series(categories_clean).value_counts()
+    colors = sns.color_palette("pastel")[0:len(cat_counts)]
+    ax[1].pie(cat_counts, labels=[f"{c} ({cat_counts[c]})" for c in cat_counts.index],
+              autopct='%1.1f%%', startangle=90, colors=colors)
     ax[1].set_title("Severity Category Distribution")
     st.pyplot(fig)
 
     # -------------------------
-    # Download CSV
+    # CSV download
     df_csv = pd.DataFrame(results)[['Image_Name','Prediction','Severity','Category','Crack Count','Total Length']]
     st.download_button(
         label="📊 Download CSV Report",
@@ -205,7 +212,7 @@ if uploaded_files:
     )
 
     # -------------------------
-    # Download PDF
+    # PDF download
     report_file = generate_pdf_report(
         [r['Image'] for r in results],
         [r['Severity'] for r in results],
