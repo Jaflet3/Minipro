@@ -67,7 +67,10 @@ def create_pdf_report_batch(image_paths, severities, categories, report_path="re
 def overlay_cracks(image_path, thresh):
     img = cv2.imread(image_path)
     overlay = img.copy()
-    overlay[thresh==255] = [0,0,255]  # Red overlay for cracks
+    # Slightly thicker red overlay for subtle cracks
+    kernel = np.ones((3,3), np.uint8)
+    dilated = cv2.dilate(thresh, kernel, iterations=1)
+    overlay[dilated==255] = [0,0,255]  # Red overlay for cracks
     combined = cv2.addWeighted(img, 0.7, overlay, 0.3, 0)
     return combined
 
@@ -93,6 +96,12 @@ if uploaded_files:
         prediction = predict_crack(temp_path)
         severity, thresh = calculate_crack_severity(temp_path)
 
+        # Adjust detection: small cracks now detected
+        if prediction >= 0.5 or severity > 2.0:
+            detect_text = "Crack Detected ⚠️"
+        else:
+            detect_text = "No Crack ✅"
+
         # Categorize severity
         if severity <= 10:
             sev_category = "Low 🟢"
@@ -111,7 +120,7 @@ if uploaded_files:
 
         results.append({
             "Image": uploaded_file.name,
-            "Prediction": "Crack Detected ⚠️" if prediction>=0.5 else "No Crack ✅",
+            "Prediction": detect_text,
             "Severity": f"{severity}%",
             "Category": sev_category,
             "Overlay": overlay_path
