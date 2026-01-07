@@ -12,186 +12,166 @@ import matplotlib.pyplot as plt
 from gtts import gTTS
 import warnings
 
-warnings.filterwarnings("ignore", category=UserWarning)
+warnings.filterwarnings("ignore")
 
 st.set_page_config(page_title="🛠️ Crack Detection Dashboard", layout="wide")
-st.title("🛠️ Enhanced Image-based Crack Detection Dashboard with Voice Feedback")
+st.title("🛠️ Image-based Crack Detection Dashboard with Voice Feedback")
 st.markdown(
-    "Upload images to detect cracks, calculate severity, length, get voice alerts, and download detailed reports."
+    "Upload images to detect cracks, calculate severity, overlay heatmaps, get voice alerts, and download reports."
 )
 
 # -------------------------
-# Download model
-MODEL_URL = "https://drive.google.com/uc?export=download&id=1nz82zuEBc0y5rcj9X7Uh5YDvv05VkZuc"
-MODEL_PATH = "model.h5"
-if not os.path.exists(MODEL_PATH):
-    with st.spinner("📥 Downloading model..."):
-        gdown.download(MODEL_URL, MODEL_PATH, quiet=False)
-
-model = load_model(MODEL_PATH, compile=False)
-
 # -------------------------
-# Functions
-def calculate_crack_severity(image_path, threshold_val=127):
+# Utility Functions
+# -------------------------
+# Download model if not exists
+def download_model(url: str, path: str):
+    if not os.path.exists(path):
+        with st.spinner("📥 Downloading model..."):
+            gdown.download(url, path, quiet=False)
+    return path
+
+# Load Keras model
+def load_crack_model(path: str):
+    return load_model(path, compile=False)
+
+# Prediction and severity calculation
+def predict_crack(image_path: str, model) -> float:
+    img = Image.open(image_path).convert("RGB")
+    h, w = model.input_shape[1], model.input_shape[2]
+    img = img.resize((w, h))
+    arr = np.expand_dims(np.array(img)/255.0, axis=0)
+    return float(model.predict(arr)[0][0])
+
+def calculate_crack_severity(image_path: str, threshold_val=127):
     img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
     _, thresh = cv2.threshold(img, threshold_val, 255, cv2.THRESH_BINARY_INV)
-    crack_pixels = np.sum(thresh == 255)
-    total_pixels = thresh.size
-    severity_score = (crack_pixels / total_pixels) * 100
-    return round(severity_score, 2), thresh
+    severity = (np.sum(thresh == 255) / thresh.size) * 100
+    return round(severity, 2), thresh
 
-def crack_length_count(thresh):
+def crack_count_length(thresh):
     contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    total_length = sum([cv2.arcLength(c, False) for c in contours])
+    total_length = sum(cv2.arcLength(c, False) for c in contours)
     return len(contours), round(total_length, 2)
 
-def predict_crack(image_path):
-    img = Image.open(image_path).convert("RGB")
-    input_shape = model.input_shape
-    height, width = input_shape[1], input_shape[2]
-    img = img.resize((width, height))
-    img_array = np.array(img) / 255.0
-    img_array = np.expand_dims(img_array, axis=0)
-    pred = model.predict(img_array)
-    return float(pred[0][0])
-
-def overlay_cracks(image_path, thresh):
+# Overlay functions
+def overlay_cracks(image_path: str, thresh):
     img = cv2.imread(image_path)
-    overlay = img.copy()
     kernel = np.ones((3,3), np.uint8)
     dilated = cv2.dilate(thresh, kernel, iterations=1)
-    overlay[dilated==255] = [0,0,255]  # Red overlay
-    combined = cv2.addWeighted(img, 0.7, overlay, 0.3, 0)
-    return combined
+    overlay = img.copy()
+    overlay[dilated==255] = [0,0,255]
+    return cv2.addWeighted(img, 0.7, overlay, 0.3, 0)
 
-def overlay_heatmap(image_path, thresh):
+def overlay_heatmap(image_path: str, thresh):
     img = cv2.imread(image_path)
     heatmap = cv2.applyColorMap(thresh, cv2.COLORMAP_JET)
-    combined = cv2.addWeighted(img, 0.7, heatmap, 0.3, 0)
-    return combined
+    return cv2.addWeighted(img, 0.7, heatmap, 0.3, 0)
 
-# Convert OpenCV BGR -> RGB
 def cv2_to_rgb(img):
     return cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
 # Voice feedback
-def speak_detection(text, filename="detection.mp3"):
+def speak(text: str, filename="detection.mp3") -> str:
     tts = gTTS(text=text, lang="en")
     tts.save(filename)
     return filename
 
 # PDF Report
-def create_pdf_report_batch(images, severities, categories, counts, lengths, detections, report_path="report.pdf"):
+def generate_pdf_report(images, severities, categories, counts, lengths, detections, path="report.pdf"):
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=15)
 
-    # Summary page
+    # Summary
     pdf.add_page()
     pdf.set_font("Arial", 'B', 16)
-    pdf.cell(200, 10, txt="Crack Detection Report - Summary", ln=True, align="C")
+    pdf.cell(200, 10, "Crack Detection Report - Summary", ln=True, align="C")
     pdf.ln(10)
     pdf.set_font("Arial", size=12)
-    total_images = len(images)
-    avg_severity = round(sum(severities)/total_images, 2)
-    pdf.cell(200, 8, txt=f"Total Images: {total_images}", ln=True)
-    pdf.cell(200, 8, txt=f"Average Severity: {avg_severity}%", ln=True)
+    pdf.cell(200, 8, f"Total Images: {len(images)}", ln=True)
+    pdf.cell(200, 8, f"Average Severity: {round(sum(severities)/len(images),2)}%", ln=True)
     pdf.ln(5)
 
-    # Per image details
     for idx, img in enumerate(images):
         temp_path = f"pdf_temp_{idx}.jpg"
         img.save(temp_path)
         pdf.add_page()
         pdf.set_font("Arial", 'B', 14)
-        pdf.cell(200, 10, txt=f"Image {idx+1}", ln=True)
+        pdf.cell(200, 10, f"Image {idx+1}", ln=True)
         pdf.set_font("Arial", size=12)
 
-        # Remove emojis for PDF
-        category_text = categories[idx].replace("🟢", "Low").replace("🟡", "Medium").replace("🔴", "High")
-        detect_text_pdf = detections[idx].replace("⚠️", "Crack Detected").replace("✅", "No Crack")
+        category_text = categories[idx].replace("🟢","Low").replace("🟡","Medium").replace("🔴","High")
+        detect_text_pdf = detections[idx].replace("⚠️","Crack Detected").replace("✅","No Crack")
 
-        pdf.cell(200, 8, txt=f"Severity: {severities[idx]}% ({category_text})", ln=True)
-        pdf.cell(200, 8, txt=f"Detection: {detect_text_pdf}", ln=True)
-        pdf.cell(200, 8, txt=f"Crack Count: {counts[idx]}, Total Length: {lengths[idx]}", ln=True)
+        pdf.cell(200, 8, f"Severity: {severities[idx]}% ({category_text})", ln=True)
+        pdf.cell(200, 8, f"Detection: {detect_text_pdf}", ln=True)
+        pdf.cell(200, 8, f"Crack Count: {counts[idx]}, Total Length: {lengths[idx]}", ln=True)
         pdf.ln(5)
         pdf.image(temp_path, x=50, w=100)
         os.remove(temp_path)
 
-    pdf.output(report_path)
-    return report_path
+    pdf.output(path)
+    return path
+
+# -------------------------
+# Load model
+MODEL_URL = "https://drive.google.com/uc?export=download&id=1nz82zuEBc0y5rcj9X7Uh5YDvv05VkZuc"
+MODEL_PATH = download_model(MODEL_URL, "model.h5")
+model = load_crack_model(MODEL_PATH)
 
 # -------------------------
 # Streamlit UI
-uploaded_files = st.file_uploader(
-    "Upload one or more images", type=["jpg","png","jpeg"], accept_multiple_files=True
-)
-
 threshold_val = st.slider("Adjust binary threshold for crack detection:", 50, 200, 127)
+uploaded_files = st.file_uploader("Upload one or more images", type=["jpg","png","jpeg"], accept_multiple_files=True)
 
 if uploaded_files:
     results = []
-    temp_image_paths = []
-    severities = []
-    categories = []
-    crack_counts = []
-    crack_lengths = []
-    detections = []
 
     for uploaded_file in uploaded_files:
-        image = Image.open(uploaded_file)
+        # Save image temporarily
+        img = Image.open(uploaded_file)
         temp_path = f"temp_{uploaded_file.name}"
-        image.save(temp_path)
-        temp_image_paths.append(temp_path)
+        img.save(temp_path)
 
-        # Prediction + severity
-        prediction = predict_crack(temp_path)
+        # Prediction & severity
+        pred = predict_crack(temp_path, model)
         severity, thresh = calculate_crack_severity(temp_path, threshold_val)
-        count, total_length = crack_length_count(thresh)
+        count, length = crack_count_length(thresh)
+        detect_text = "Crack Detected ⚠️" if pred >=0.5 or severity >2 else "No Crack ✅"
 
-        # Detection text
-        detect_text = "Crack Detected ⚠️" if prediction >= 0.5 or severity > 2.0 else "No Crack ✅"
-
-        # Voice feedback (remove emojis for speech)
-        audio_file = speak_detection(detect_text.replace("⚠️","").replace("✅",""))
+        # Voice feedback
+        audio_file = speak(detect_text.replace("⚠️","").replace("✅",""))
         st.audio(audio_file, format='audio/mp3')
 
         # Categorize severity
         if severity <= 10:
-            sev_category = "Low 🟢"
+            category = "Low 🟢"
         elif severity <= 30:
-            sev_category = "Medium 🟡"
+            category = "Medium 🟡"
         else:
-            sev_category = "High 🔴"
+            category = "High 🔴"
 
-        severities.append(severity)
-        categories.append(sev_category)
-        crack_counts.append(count)
-        crack_lengths.append(total_length)
-        detections.append(detect_text)
-
-        # Overlays
         overlay_img = overlay_cracks(temp_path, thresh)
         heatmap_img = overlay_heatmap(temp_path, thresh)
 
         results.append({
-            "Image": image,  # PIL Image
+            "Image": img,
             "Image_Name": uploaded_file.name,
             "Prediction": detect_text,
             "Severity": severity,
-            "Category": sev_category,
+            "Category": category,
             "Crack Count": count,
-            "Total Length": total_length,
+            "Total Length": length,
             "Overlay": overlay_img,
             "Heatmap": heatmap_img
         })
 
     # -------------------------
-    # Display interactive table
+    # Display results
     st.subheader("📝 Results Dashboard")
     df_display = pd.DataFrame(results)[['Image_Name','Prediction','Severity','Category','Crack Count','Total Length']]
     st.dataframe(df_display)
 
-    # Display images side by side
     st.subheader("📷 Image Overlays")
     for res in results:
         st.write(f"**{res['Image_Name']}** - {res['Prediction']} - Severity: {res['Severity']}% ({res['Category']})")
@@ -201,15 +181,15 @@ if uploaded_files:
         col3.image(cv2_to_rgb(res['Heatmap']), caption="Heatmap", use_column_width=True)
 
     # -------------------------
-    # Severity distribution chart
+    # Severity charts
     st.subheader("📊 Severity Analysis")
     fig, ax = plt.subplots(1,2, figsize=(10,4))
-    ax[0].bar([r['Image_Name'] for r in results], severities, color='orange')
+    ax[0].bar([r['Image_Name'] for r in results], [r['Severity'] for r in results], color='orange')
     ax[0].set_ylabel("Severity %")
     ax[0].set_xticklabels([r['Image_Name'] for r in results], rotation=45, ha='right')
     ax[0].set_title("Severity per Image")
 
-    cat_counts = pd.Series(categories).value_counts()
+    cat_counts = pd.Series([r['Category'] for r in results]).value_counts()
     ax[1].pie(cat_counts, labels=cat_counts.index, autopct='%1.1f%%', startangle=140)
     ax[1].set_title("Severity Category Distribution")
     st.pyplot(fig)
@@ -217,23 +197,22 @@ if uploaded_files:
     # -------------------------
     # Download CSV
     df_csv = pd.DataFrame(results)[['Image_Name','Prediction','Severity','Category','Crack Count','Total Length']]
-    csv = df_csv.to_csv(index=False).encode('utf-8')
     st.download_button(
         label="📊 Download CSV Report",
-        data=csv,
+        data=df_csv.to_csv(index=False).encode('utf-8'),
         file_name="Crack_Report.csv",
         mime="text/csv"
     )
 
     # -------------------------
-    # Download PDF report
-    report_file = create_pdf_report_batch(
+    # Download PDF
+    report_file = generate_pdf_report(
         [r['Image'] for r in results],
-        severities,
-        categories,
-        crack_counts,
-        crack_lengths,
-        detections
+        [r['Severity'] for r in results],
+        [r['Category'] for r in results],
+        [r['Crack Count'] for r in results],
+        [r['Total Length'] for r in results],
+        [r['Prediction'] for r in results]
     )
     with open(report_file, "rb") as f:
         st.download_button(
