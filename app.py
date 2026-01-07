@@ -73,7 +73,9 @@ def overlay_heatmap(image_path, thresh):
 def cv2_to_rgb(img):
     return cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
-def create_pdf_report_batch(images, severities, categories, counts, lengths, report_path="report.pdf"):
+# -------------------------
+# PDF Report
+def create_pdf_report_batch(images, severities, categories, counts, lengths, detections, report_path="report.pdf"):
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=15)
 
@@ -92,12 +94,18 @@ def create_pdf_report_batch(images, severities, categories, counts, lengths, rep
     # Per image details
     for idx, img in enumerate(images):
         temp_path = f"pdf_temp_{idx}.jpg"
-        img.save(temp_path)  # Save PIL image temporarily
+        img.save(temp_path)
         pdf.add_page()
         pdf.set_font("Arial", 'B', 14)
         pdf.cell(200, 10, txt=f"Image {idx+1}", ln=True)
         pdf.set_font("Arial", size=12)
-        pdf.cell(200, 8, txt=f"Severity: {severities[idx]}% ({categories[idx]})", ln=True)
+
+        # Replace emojis for PDF
+        category_text = categories[idx].replace("🟢", "Low").replace("🟡", "Medium").replace("🔴", "High")
+        detect_text_pdf = detections[idx].replace("⚠️", "Crack Detected").replace("✅", "No Crack")
+
+        pdf.cell(200, 8, txt=f"Severity: {severities[idx]}% ({category_text})", ln=True)
+        pdf.cell(200, 8, txt=f"Detection: {detect_text_pdf}", ln=True)
         pdf.cell(200, 8, txt=f"Crack Count: {counts[idx]}, Total Length: {lengths[idx]}", ln=True)
         pdf.ln(5)
         pdf.image(temp_path, x=50, w=100)
@@ -121,6 +129,7 @@ if uploaded_files:
     categories = []
     crack_counts = []
     crack_lengths = []
+    detections = []
 
     for uploaded_file in uploaded_files:
         image = Image.open(uploaded_file)
@@ -148,6 +157,7 @@ if uploaded_files:
         categories.append(sev_category)
         crack_counts.append(count)
         crack_lengths.append(total_length)
+        detections.append(detect_text)
 
         # Overlays
         overlay_img = overlay_cracks(temp_path, thresh)
@@ -207,7 +217,14 @@ if uploaded_files:
 
     # -------------------------
     # Download PDF report
-    report_file = create_pdf_report_batch([r['Image'] for r in results], severities, categories, crack_counts, crack_lengths)
+    report_file = create_pdf_report_batch(
+        [r['Image'] for r in results],
+        severities,
+        categories,
+        crack_counts,
+        crack_lengths,
+        detections
+    )
     with open(report_file, "rb") as f:
         st.download_button(
             label="📄 Download PDF Report",
