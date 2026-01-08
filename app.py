@@ -1,124 +1,98 @@
 import streamlit as st
+from PIL import Image
 import numpy as np
 import cv2
-from PIL import Image
 import os
 import gdown
 from tensorflow.keras.models import load_model
 import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from gtts import gTTS
+import warnings
 
-# ---------------- PAGE SETUP ----------------
-st.set_page_config(page_title="Concrete Crack Detection", layout="wide")
-st.title("🧠 AI-Based Concrete Crack Detection")
+warnings.filterwarnings("ignore")
 
-st.markdown("""
-This system combines **Deep Learning (CNN)** and **Image Processing**  
-to accurately detect **thin and thick concrete cracks** while avoiding false alarms.
-""")
+# -------------------------
+# PAGE SETUP
+st.set_page_config(page_title="Crack Detection System", layout="wide")
+st.title("🛠️ Concrete Crack Detection System")
 
-# ---------------- LOAD MODEL ----------------
+# -------------------------
+# DOWNLOAD & LOAD MODEL
 MODEL_URL = "https://drive.google.com/uc?export=download&id=1nz82zuEBc0y5rcj9X7Uh5YDvv05VkZuc"
 MODEL_PATH = "crack_model.h5"
 
-@st.cache_resource
-def load_crack_model():
-    if not os.path.exists(MODEL_PATH):
+if not os.path.exists(MODEL_PATH):
+    with st.spinner("Downloading model..."):
         gdown.download(MODEL_URL, MODEL_PATH, quiet=False)
-    return load_model(MODEL_PATH, compile=False)
 
-model = load_crack_model()
+model = load_model(MODEL_PATH, compile=False)
 
-# ---------------- IMAGE FUNCTIONS ----------------
-def preprocess_for_cnn(img):
-    img = img.resize((150, 150))
-    img = np.array(img) / 255.0
-    return np.expand_dims(img, axis=0)
+# -------------------------
+# FUNCTIONS
+def cnn_predict(img_path):
+    img = Image.open(img_path).convert("RGB")
+    img = img.resize((150,150))
+    arr = np.expand_dims(np.array(img)/255.0, axis=0)
+    return float(model.predict(arr)[0][0])
 
-def cnn_predict(img):
-    pred = model.predict(preprocess_for_cnn(img))[0][0]
-    return float(pred)
+def crack_severity(img_path, thresh_val=127):
+    gray = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
+    blur = cv2.GaussianBlur(gray,(5,5),0)
+    _, thresh = cv2.threshold(blur, thresh_val, 255, cv2.THRESH_BINARY_INV)
+    severity = (np.sum(thresh==255) / thresh.size) * 100
+    return round(severity,3), thresh
 
-def calculate_severity(img):
-    gray = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2GRAY)
+def overlay_crack(img_path, thresh):
+    img = cv2.imread(img_path)
+    overlay = img.copy()
+    overlay[thresh==255] = [0,0,255]
+    return cv2.cvtColor(overlay, cv2.COLOR_BGR2RGB)
 
-    thresh = cv2.adaptiveThreshold(
-        gray,
-        255,
-        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-        cv2.THRESH_BINARY_INV,
-        11,
-        2
-    )
+def speak(text):
+    tts = gTTS(text=text)
+    tts.save("voice.mp3")
+    return "voice.mp3"
 
-    crack_pixels = np.sum(thresh == 255)
-    total_pixels = thresh.size
-    severity = (crack_pixels / total_pixels) * 100
+# -------------------------
+# UPLOAD
+threshold_val = st.slider("Binary Threshold", 80, 200, 127)
+uploaded_files = st.file_uploader("Upload Image(s)", type=["jpg","png","jpeg"], accept_multiple_files=True)
 
-    return round(severity, 2), thresh
-
-def overlay_cracks(img, mask):
-    img_cv = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
-    overlay = img_cv.copy()
-    overlay[mask == 255] = [0, 0, 255]
-    return cv2.cvtColor(cv2.addWeighted(img_cv, 0.7, overlay, 0.3, 0), cv2.COLOR_BGR2RGB)
-
-# ---------------- FILE UPLOAD ----------------
-uploaded_files = st.file_uploader(
-    "📤 Upload concrete images",
-    type=["jpg", "jpeg", "png"],
-    accept_multiple_files=True
-)
-
-results = []
-
-# ---------------- PROCESS IMAGES ----------------
 if uploaded_files:
     for file in uploaded_files:
-        img = Image.open(file).convert("RGB")
+        img = Image.open(file)
+        path = f"temp_{file.name}"
+        img.save(path)
 
-        severity, mask = calculate_severity(img)
-        cnn_score = cnn_predict(img)
+        cnn_score = cnn_predict(path)
+        severity, thresh = crack_severity(path, threshold_val)
 
-        # -------- FINAL DECISION LOGIC --------
-        if severity < 0.15:
+        # -------------------------
+        # FINAL DECISION LOGIC
+        if severity < 0.3:
             decision = "No Crack ✅"
-        elif severity < 1.0:
-            decision = "Crack Detected ⚠️" if cnn_score >= 0.55 else "No Crack ✅"
+        elif severity < 1.5:
+            decision = "Crack Detected ⚠️" if cnn_score >= 0.65 else "No Crack ✅"
         else:
             decision = "Crack Detected ⚠️"
 
-        # Severity category
-        if severity < 1:
-            category = "Low 🟢"
-        elif severity < 5:
-            category = "Medium 🟡"
-        else:
-            category = "High 🔴"
+        audio = speak(decision.replace("⚠️","").replace("✅",""))
+        overlay = overlay_crack(path, thresh)
 
-        overlay = overlay_cracks(img, mask)
-
-        results.append({
-            "Image Name": file.name,
-            "Prediction": decision,
-            "Severity (%)": severity,
-            "Category": category,
-            "Original": img,
-            "Overlay": overlay
-        })
-
-    # ---------------- RESULTS TABLE ----------------
-    st.subheader("📋 Detection Results")
-    df = pd.DataFrame(results)[["Image Name", "Prediction", "Severity (%)", "Category"]]
-    st.dataframe(df, use_container_width=True)
-
-    # ---------------- IMAGE DISPLAY ----------------
-    st.subheader("📷 Image Overlays")
-    for r in results:
-        st.markdown(
-            f"**{r['Image Name']} — {r['Prediction']} | Severity: {r['Severity (%)']}% ({r['Category']})**"
-        )
+        # -------------------------
+        # DISPLAY
+        st.subheader(f"📷 {file.name}")
         col1, col2 = st.columns(2)
-        col1.image(r["Original"], caption="Original Image", use_column_width=True)
-        col2.image(r["Overlay"], caption="Crack Highlighted", use_column_width=True)
 
-    st.success("✅ Crack analysis completed successfully!")
+        col1.image(img, caption="Original Image", use_column_width=True)
+        col2.image(overlay, caption="Detected Cracks", use_column_width=True)
+
+        st.markdown(f"### 🧪 Result: **{decision}**")
+        st.write(f"CNN Confidence: `{cnn_score:.2f}`")
+        st.write(f"Crack Severity: `{severity}%`")
+
+        st.audio(audio)
+
+        st.divider()
