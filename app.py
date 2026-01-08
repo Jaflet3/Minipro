@@ -1,18 +1,22 @@
 import streamlit as st
-from PIL import Image
 import numpy as np
 import cv2
+from PIL import Image
 import os
 import gdown
 from tensorflow.keras.models import load_model
 import pandas as pd
-import warnings
 
-warnings.filterwarnings("ignore")
+# ---------------- PAGE SETUP ----------------
+st.set_page_config(page_title="Concrete Crack Detection", layout="wide")
+st.title("🧠 AI-Based Concrete Crack Detection")
 
-st.set_page_config(page_title="Crack Detection", layout="wide")
-st.title("🧠 AI-based Concrete Crack Detection")
+st.markdown("""
+This system combines **Deep Learning (CNN)** and **Image Processing**  
+to accurately detect **thin and thick concrete cracks** while avoiding false alarms.
+""")
 
+# ---------------- LOAD MODEL ----------------
 MODEL_URL = "https://drive.google.com/uc?export=download&id=1nz82zuEBc0y5rcj9X7Uh5YDvv05VkZuc"
 MODEL_PATH = "crack_model.h5"
 
@@ -24,74 +28,97 @@ def load_crack_model():
 
 model = load_crack_model()
 
-def calculate_severity(image_path):
-    gray = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
-    blur = cv2.GaussianBlur(gray,(5,5),0)
-    _, thresh = cv2.threshold(blur, 160, 255, cv2.THRESH_BINARY_INV)
-    kernel = np.ones((3,3),np.uint8)
-    thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel)
-    severity = (np.sum(thresh == 255) / thresh.size) * 100
-    return round(severity,2), thresh
+# ---------------- IMAGE FUNCTIONS ----------------
+def preprocess_for_cnn(img):
+    img = img.resize((150, 150))
+    img = np.array(img) / 255.0
+    return np.expand_dims(img, axis=0)
 
-def cnn_predict(image_path):
-    img = Image.open(image_path).convert("RGB").resize((150,150))
-    arr = np.expand_dims(np.array(img)/255.0, axis=0)
-    return float(model.predict(arr)[0][0])
+def cnn_predict(img):
+    pred = model.predict(preprocess_for_cnn(img))[0][0]
+    return float(pred)
 
-def overlay(image_path, mask):
-    img = cv2.imread(image_path)
-    overlay = img.copy()
-    overlay[mask == 255] = [0,0,255]
-    return cv2.addWeighted(img, 0.7, overlay, 0.3, 0)
+def calculate_severity(img):
+    gray = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2GRAY)
 
-def to_rgb(img):
-    return cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    thresh = cv2.adaptiveThreshold(
+        gray,
+        255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY_INV,
+        11,
+        2
+    )
 
-files = st.file_uploader("Upload images", type=["jpg","png","jpeg"], accept_multiple_files=True)
+    crack_pixels = np.sum(thresh == 255)
+    total_pixels = thresh.size
+    severity = (crack_pixels / total_pixels) * 100
+
+    return round(severity, 2), thresh
+
+def overlay_cracks(img, mask):
+    img_cv = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+    overlay = img_cv.copy()
+    overlay[mask == 255] = [0, 0, 255]
+    return cv2.cvtColor(cv2.addWeighted(img_cv, 0.7, overlay, 0.3, 0), cv2.COLOR_BGR2RGB)
+
+# ---------------- FILE UPLOAD ----------------
+uploaded_files = st.file_uploader(
+    "📤 Upload concrete images",
+    type=["jpg", "jpeg", "png"],
+    accept_multiple_files=True
+)
 
 results = []
 
-if files:
-    for f in files:
-        img = Image.open(f)
-        path = f"temp_{f.name}"
-        img.save(path)
+# ---------------- PROCESS IMAGES ----------------
+if uploaded_files:
+    for file in uploaded_files:
+        img = Image.open(file).convert("RGB")
 
-        severity, mask = calculate_severity(path)
+        severity, mask = calculate_severity(img)
+        cnn_score = cnn_predict(img)
 
-        # 🔒 HARD GATE
-        if severity < 0.3:
+        # -------- FINAL DECISION LOGIC --------
+        if severity < 0.15:
             decision = "No Crack ✅"
-            pred = 0.0
+        elif severity < 1.0:
+            decision = "Crack Detected ⚠️" if cnn_score >= 0.55 else "No Crack ✅"
         else:
-            pred = cnn_predict(path)
-            decision = "Crack Detected ⚠️" if pred >= 0.6 else "No Crack ✅"
+            decision = "Crack Detected ⚠️"
 
-        if severity < 0.3:
+        # Severity category
+        if severity < 1:
             category = "Low 🟢"
-        elif severity < 10:
+        elif severity < 5:
             category = "Medium 🟡"
         else:
             category = "High 🔴"
 
+        overlay = overlay_cracks(img, mask)
+
         results.append({
-            "Image": img,
-            "Name": f.name,
-            "Decision": decision,
-            "Severity": severity,
+            "Image Name": file.name,
+            "Prediction": decision,
+            "Severity (%)": severity,
             "Category": category,
-            "Overlay": overlay(path, mask)
+            "Original": img,
+            "Overlay": overlay
         })
 
-    df = pd.DataFrame(results)[["Name","Decision","Severity","Category"]]
-    st.subheader("📋 Results")
-    st.dataframe(df)
+    # ---------------- RESULTS TABLE ----------------
+    st.subheader("📋 Detection Results")
+    df = pd.DataFrame(results)[["Image Name", "Prediction", "Severity (%)", "Category"]]
+    st.dataframe(df, use_container_width=True)
 
-    st.subheader("📷 Visualization")
+    # ---------------- IMAGE DISPLAY ----------------
+    st.subheader("📷 Image Overlays")
     for r in results:
-        st.markdown(f"**{r['Name']} — {r['Decision']} | Severity: {r['Severity']}%**")
-        c1, c2 = st.columns(2)
-        c1.image(r["Image"], caption="Original", use_column_width=True)
-        c2.image(to_rgb(r["Overlay"]), caption="Crack Highlighted", use_column_width=True)
+        st.markdown(
+            f"**{r['Image Name']} — {r['Prediction']} | Severity: {r['Severity (%)']}% ({r['Category']})**"
+        )
+        col1, col2 = st.columns(2)
+        col1.image(r["Original"], caption="Original Image", use_column_width=True)
+        col2.image(r["Overlay"], caption="Crack Highlighted", use_column_width=True)
 
-    st.success("✅ Accurate crack detection completed")
+    st.success("✅ Crack analysis completed successfully!")
