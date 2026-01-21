@@ -5,26 +5,20 @@ import os
 import gdown
 from PIL import Image
 from tensorflow.keras.models import load_model
-from gtts import gTTS
-import tempfile
 import warnings
 
 warnings.filterwarnings("ignore")
 
 # -----------------------------
 # PAGE CONFIG
-# -----------------------------
 st.set_page_config(
     page_title="Concrete Crack Detection",
-    layout="wide",
-    page_icon="🛠️"
+    layout="wide"
 )
-
 st.title("🛠️ Concrete Crack Detection System")
 
 # -----------------------------
 # LOAD CNN MODEL
-# -----------------------------
 MODEL_URL = "https://drive.google.com/uc?export=download&id=1nz82zuEBc0y5rcj9X7Uh5YDvv05VkZuc"
 MODEL_PATH = "crack_model.h5"
 
@@ -36,78 +30,50 @@ model = load_model(MODEL_PATH, compile=False)
 
 # -----------------------------
 # FUNCTIONS
-# -----------------------------
+
 def cnn_predict(img_path):
-    """
-    Returns CNN probability score (0–1)
-    """
     img = Image.open(img_path).convert("RGB")
     img = img.resize((150, 150))
-    arr = np.array(img) / 255.0
-    arr = np.expand_dims(arr, axis=0)
-    score = model.predict(arr, verbose=0)[0][0]
-    return float(score)
-
+    arr = np.expand_dims(np.array(img) / 255.0, axis=0)
+    return float(model.predict(arr, verbose=0)[0][0])
 
 def crack_severity(img_path):
-    """
-    Calculates crack area percentage using thresholding
-    """
     gray = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
-    blur = cv2.GaussianBlur(gray, (5, 5), 0)
 
+    blur = cv2.GaussianBlur(gray, (5, 5), 0)
     _, thresh = cv2.threshold(
-        blur, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU
+        blur, 0, 255,
+        cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU
     )
 
-    crack_pixels = np.sum(thresh == 255)
-    total_pixels = thresh.size
-    severity = (crack_pixels / total_pixels) * 100
+    # Remove noise
+    kernel = np.ones((5, 5), np.uint8)
+    thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel)
 
+    contours, _ = cv2.findContours(
+        thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+    )
+
+    valid_pixels = 0
+    for cnt in contours:
+        area = cv2.contourArea(cnt)
+        if area > 60:  # ignore tiny noise
+            valid_pixels += area
+
+    severity = (valid_pixels / thresh.size) * 100
     return round(severity, 3), thresh
 
-
-def edge_ratio(img_path):
-    """
-    Edge density for additional validation
-    """
-    gray = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
-    edges = cv2.Canny(gray, 100, 200)
-    return np.sum(edges > 0) / edges.size
-
-
 def overlay_crack(img_path, thresh):
-    """
-    Overlays detected crack in red color
-    """
     img = cv2.imread(img_path)
     overlay = img.copy()
     overlay[thresh == 255] = [0, 0, 255]
     return cv2.cvtColor(overlay, cv2.COLOR_BGR2RGB)
 
-
-def speak(text):
-    """
-    Browser-based text-to-speech (Cloud safe)
-    """
-    tts = gTTS(text=text, lang="en")
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as fp:
-        tts.save(fp.name)
-        st.audio(fp.name)
-
-# -----------------------------
-# SIDEBAR
-# -----------------------------
-st.sidebar.header("⚙️ Settings")
-voice_on = st.sidebar.checkbox("🔊 Enable Voice Alert", value=True)
-cnn_threshold = st.sidebar.slider("CNN Crack Threshold", 0.0, 1.0, 0.65)
-
 # -----------------------------
 # IMAGE UPLOAD
-# -----------------------------
 uploaded_file = st.file_uploader(
-    "Upload concrete surface image",
-    type=["jpg", "jpeg", "png"]
+    "Upload concrete image",
+    type=["jpg", "png", "jpeg"]
 )
 
 if uploaded_file:
@@ -115,33 +81,25 @@ if uploaded_file:
     temp_path = "temp.jpg"
     img.save(temp_path)
 
-    # -----------------------------
-    # PREDICTIONS
-    # -----------------------------
+    # CNN Prediction
     cnn_score = cnn_predict(temp_path)
-    severity, thresh = crack_severity(temp_path)
-    edge_val = edge_ratio(temp_path)
 
-    # -----------------------------
-    # FINAL DECISION LOGIC
-    # -----------------------------
-    if severity < 0.2:
+    # CNN THRESHOLD (KEY FIX)
+    CNN_THRESHOLD = 0.75
+
+    if cnn_score < CNN_THRESHOLD:
         decision = "No Crack"
         severity_level = "None"
         recommendation = "Structure is safe"
+        severity = 0.0
         show_overlay = False
-
-    elif cnn_score < cnn_threshold and edge_val < 0.01:
-        decision = "No Crack"
-        severity_level = "None"
-        recommendation = "Structure is safe"
-        show_overlay = False
-
+        thresh = None
     else:
         decision = "Crack Detected"
+        severity, thresh = crack_severity(temp_path)
         show_overlay = True
 
-        if severity < 1.5:
+        if severity < 1:
             severity_level = "Low"
             recommendation = "Monitor periodically"
         elif severity < 5:
@@ -153,38 +111,32 @@ if uploaded_file:
 
     # -----------------------------
     # DISPLAY IMAGES
-    # -----------------------------
     col1, col2 = st.columns(2)
 
     col1.image(img, caption="Original Image", use_column_width=True)
 
-    if show_overlay:
+    if show_overlay and thresh is not None:
         overlay_img = overlay_crack(temp_path, thresh)
-        col2.image(overlay_img, caption="Crack Visualization", use_column_width=True)
+        col2.image(
+            overlay_img,
+            caption="Crack Visualization",
+            use_column_width=True
+        )
     else:
-        col2.image(img, caption="No Crack Found", use_column_width=True)
+        col2.image(
+            img,
+            caption="No Crack Detected",
+            use_column_width=True
+        )
 
     # -----------------------------
-    # DISPLAY RESULTS
-    # -----------------------------
+    # RESULTS
     if decision == "Crack Detected":
         st.error(f"Result: {decision}")
     else:
         st.success(f"Result: {decision}")
 
     st.info(f"Severity Level: {severity_level}")
-    st.write(f"🔍 CNN Score: **{cnn_score:.3f}**")
+    st.write(f"🧠 CNN Confidence Score: **{round(cnn_score, 3)}**")
     st.write(f"📏 Crack Area (%): **{severity}**")
     st.write(f"🛠 Recommendation: **{recommendation}**")
-
-    # -----------------------------
-    # VOICE ALERT
-    # -----------------------------
-    if voice_on:
-        if decision == "Crack Detected":
-            speak(
-                f"Warning. Crack detected. Severity level is {severity_level}. "
-                f"{recommendation}"
-            )
-        else:
-            speak("No crack detected. Structure is safe.")
