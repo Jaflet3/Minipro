@@ -13,6 +13,7 @@ warnings.filterwarnings("ignore")
 # PAGE CONFIG
 st.set_page_config(page_title="Concrete Crack Detection", layout="wide")
 st.title("🛠️ Concrete Crack Detection System")
+st.caption("AI-based structural crack analysis using CNN & image processing")
 
 # -----------------------------
 # LOAD MODEL
@@ -33,6 +34,14 @@ def cnn_predict(img_path):
     img = img.resize((150, 150))
     arr = np.expand_dims(np.array(img) / 255.0, axis=0)
     return float(model.predict(arr)[0][0])
+
+def cnn_level(score):
+    if score < 0.4:
+        return "Low"
+    elif score < 0.7:
+        return "Medium"
+    else:
+        return "High"
 
 def crack_severity(img_path):
     gray = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
@@ -58,7 +67,10 @@ def overlay_crack(img_path, thresh):
 
 # -----------------------------
 # UPLOAD IMAGE
-uploaded_file = st.file_uploader("Upload concrete image", type=["jpg", "png", "jpeg"])
+uploaded_file = st.file_uploader(
+    "📤 Upload concrete surface image",
+    type=["jpg", "png", "jpeg"]
+)
 
 if uploaded_file:
     img = Image.open(uploaded_file)
@@ -67,24 +79,18 @@ if uploaded_file:
 
     # Predictions
     cnn_score = cnn_predict(temp_path)
+    cnn_conf = cnn_level(cnn_score)
     severity, thresh = crack_severity(temp_path)
     edge_val = edge_ratio(temp_path)
 
     # -----------------------------
-    # FINAL DECISION LOGIC (VERY IMPORTANT)
+    # FINAL DECISION LOGIC
 
-    if severity < 0.2:
+    if severity < 0.2 and cnn_score < 0.5:
         decision = "No Crack"
         severity_level = "None"
         recommendation = "Structure is safe"
         show_overlay = False
-
-    elif cnn_score < 0.65 and edge_val < 0.01:
-        decision = "No Crack"
-        severity_level = "None"
-        recommendation = "Structure is safe"
-        show_overlay = False
-
     else:
         decision = "Crack Detected"
         show_overlay = True
@@ -100,25 +106,42 @@ if uploaded_file:
             recommendation = "Immediate maintenance required"
 
     # -----------------------------
-    # DISPLAY RESULTS
+    # DISPLAY IMAGES
     col1, col2 = st.columns(2)
 
     col1.image(img, caption="Original Image", use_column_width=True)
 
     if show_overlay:
-        overlay_img = overlay_crack(temp_path, thresh)
-        col2.image(overlay_img, caption="Crack Visualization", use_column_width=True)
+        col2.image(
+            overlay_crack(temp_path, thresh),
+            caption="Detected Crack Area",
+            use_column_width=True
+        )
     else:
         col2.image(img, caption="No Crack Found", use_column_width=True)
 
     # -----------------------------
-    # OUTPUT TEXT
-    if decision == "Crack Detected":
-        st.error(f"Result: {decision}")
-    else:
-        st.success(f"Result: {decision}")
+    # RESULTS DASHBOARD
+    st.subheader("📊 Analysis Results")
 
-    st.info(f"Severity Level: {severity_level}")
-    st.write(f"🔍 CNN Score: {round(cnn_score, 3)}")
-    st.write(f"📏 Crack Area (%): {severity}")
+    m1, m2, m3 = st.columns(3)
+    m1.metric("CNN Confidence", f"{round(cnn_score*100,2)}%", cnn_conf)
+    m2.metric("Crack Area", f"{severity} %")
+    m3.metric("Edge Density", f"{round(edge_val,4)}")
+
+    st.progress(min(int(severity * 5), 100))
+
+    # -----------------------------
+    # FINAL STATUS
+    if decision == "Crack Detected":
+        st.error(f"⚠️ Result: {decision}")
+    else:
+        st.success(f"✅ Result: {decision}")
+
+    st.info(f"🧱 Severity Level: {severity_level}")
     st.write(f"🛠 Recommendation: {recommendation}")
+
+    with st.expander("📘 How the decision was made"):
+        st.write(f"- CNN confidence level: **{cnn_conf}**")
+        st.write(f"- Crack pixel ratio: **{severity}%**")
+        st.write(f"- Edge density: **{round(edge_val,4)}**")
