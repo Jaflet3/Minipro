@@ -1,11 +1,7 @@
 streamlit
-tensorflow
-opencv-python-headless
-Pillow
 numpy
-matplotlib
-pandas
-fpdf
+opencv-python-headless
+pillow
+tensorflow
 gdown
 gtts
-seaborn
