@@ -3,12 +3,13 @@ import numpy as np
 import cv2
 import os
 import gdown
-import pyttsx3
 from PIL import Image
 from tensorflow.keras.models import load_model
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.pagesizes import A4
+from gtts import gTTS
+import tempfile
 import warnings
 
 warnings.filterwarnings("ignore")
@@ -23,7 +24,6 @@ st.set_page_config(
 
 st.title("🛠️ Concrete Crack Detection System")
 st.caption("Hybrid CNN + Image Processing based Structural Health Monitoring")
-
 st.divider()
 
 # -----------------------------
@@ -38,11 +38,12 @@ if not os.path.exists(MODEL_PATH):
 model = load_model(MODEL_PATH, compile=False)
 
 # -----------------------------
-# TEXT TO SPEECH
+# TEXT TO SPEECH USING gTTS
 def speak(text):
-    engine = pyttsx3.init()
-    engine.say(text)
-    engine.runAndWait()
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as fp:
+        tts = gTTS(text=text, lang='en')
+        tts.save(fp.name)
+        st.audio(fp.name, format='audio/mp3')
 
 # -----------------------------
 # FUNCTIONS
@@ -108,7 +109,7 @@ if uploaded_file:
     edge_val = edge_ratio(temp_path)
 
     # -----------------------------
-    # DECISION LOGIC (UNCHANGED)
+    # DECISION LOGIC
     if severity < 0.2:
         decision = "No Crack"
         severity_level = "None"
@@ -150,7 +151,6 @@ if uploaded_file:
     # -----------------------------
     # DASHBOARD
     st.subheader("📊 Analysis Results")
-
     m1, m2, m3 = st.columns(3)
     m1.metric("CNN Confidence", f"{round(cnn_score*100,2)}%")
     m2.metric("Crack Area", f"{severity} %")
