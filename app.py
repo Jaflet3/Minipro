@@ -3,10 +3,12 @@ import numpy as np
 import cv2
 from PIL import Image
 from tensorflow.keras.models import load_model
-import gdown
 import os
 import warnings
 import io
+
+# Hugging Face Hub
+from huggingface_hub import hf_hub_download
 
 # -----------------------------
 # SUPPRESS WARNINGS & TF LOGS
@@ -26,14 +28,16 @@ st.caption("Hybrid CNN + Image Processing based Structural Health Monitoring")
 st.divider()
 
 # -----------------------------
-# DOWNLOAD & LOAD MODEL
+# LOAD MODEL FROM HUGGING FACE
 MODEL_PATH = "crack_model.h5"
-FILE_ID = "1nz82zuEBc0y5rcj9X7Uh5YDvv05VkZuc"
 
 if not os.path.exists(MODEL_PATH):
-    url = f"https://drive.google.com/uc?export=download&id={FILE_ID}"
-    with st.spinner("📥 Downloading CNN model..."):
-        gdown.download(url, MODEL_PATH, quiet=False)
+    with st.spinner("📥 Downloading CNN model from Hugging Face..."):
+        # Replace 'your-username/model-repo' with your Hugging Face repo and filename
+        MODEL_PATH = hf_hub_download(
+            repo_id="your-username/model-repo",
+            filename="crack_model.h5"
+        )
 
 model = load_model(MODEL_PATH, compile=False)
 
@@ -71,7 +75,6 @@ uploaded_file = st.file_uploader(
 )
 
 if uploaded_file:
-    # Read image in memory
     image_bytes = uploaded_file.read()
     pil_img = Image.open(io.BytesIO(image_bytes))
     opencv_img = cv2.imdecode(np.frombuffer(image_bytes, np.uint8), cv2.IMREAD_COLOR)
