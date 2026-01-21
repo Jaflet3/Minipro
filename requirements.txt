@@ -2,7 +2,7 @@ streamlit==1.26.0
 numpy==1.26.0
 opencv-python==4.8.1.78
 gdown==4.7.1
-pyttsx3==2.90
 Pillow==10.1.0
 tensorflow==2.14.0
 reportlab==4.0.5
+gTTS==2.3.2
