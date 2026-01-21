@@ -93,7 +93,7 @@ if files:
         severity, mask = calculate_severity(path, threshold)
 
         # -------------------------------
-        # HARD GATE (FIXED LOGIC)
+        # HARD GATE DECISION (FIXED)
         if cnn_score < 0.75 or severity < 0.3:
             decision = "No Crack"
             severity_level = "None"
@@ -111,8 +111,14 @@ if files:
                 severity_level = "High"
                 recommendation = "Immediate maintenance required"
 
+        # -------------------------------
+        # VISUALIZATION FIX
+        if decision == "Crack Detected":
+            overlay = overlay_crack(path, mask)
+        else:
+            overlay = np.array(img)
+
         audio = speak(decision)
-        overlay = overlay_crack(path, mask)
 
         # SAVE RESULT
         results.append({
@@ -128,7 +134,7 @@ if files:
         st.subheader(file.name)
         col1, col2 = st.columns(2)
         col1.image(img, caption="Original Image", use_column_width=True)
-        col2.image(overlay, caption="Crack Highlighted", use_column_width=True)
+        col2.image(overlay, caption="Crack Visualization", use_column_width=True)
 
         st.success(f"Result: {decision}")
         st.info(f"Severity Level: {severity_level}")
