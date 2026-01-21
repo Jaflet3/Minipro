@@ -6,19 +6,17 @@ import os
 import gdown
 from tensorflow.keras.models import load_model
 import pandas as pd
-from gtts import gTTS
-from fpdf import FPDF
 import warnings
 
 warnings.filterwarnings("ignore")
 
-# -------------------------------
-# PAGE CONFIG
-st.set_page_config(page_title="Concrete Crack Detection", layout="wide")
-st.title("🧠 AI-Based Concrete Crack Detection System")
+# -------------------------
+# PAGE SETUP
+st.set_page_config(page_title="Crack Detection System", layout="wide")
+st.title("🛠️ Concrete Crack Detection System")
 
-# -------------------------------
-# MODEL DOWNLOAD & LOAD
+# -------------------------
+# DOWNLOAD & LOAD MODEL
 MODEL_URL = "https://drive.google.com/uc?export=download&id=1nz82zuEBc0y5rcj9X7Uh5YDvv05VkZuc"
 MODEL_PATH = "crack_model.h5"
 
@@ -28,80 +26,73 @@ if not os.path.exists(MODEL_PATH):
 
 model = load_model(MODEL_PATH, compile=False)
 
-# -------------------------------
+# -------------------------
 # FUNCTIONS
+
 def cnn_predict(img_path):
-    img = Image.open(img_path).convert("RGB").resize((150,150))
-    arr = np.expand_dims(np.array(img)/255.0, axis=0)
-    return float(model.predict(arr)[0][0])
+    img = Image.open(img_path).convert("RGB")
+    img = img.resize((150, 150))
+    arr = np.expand_dims(np.array(img) / 255.0, axis=0)
+    return float(model.predict(arr, verbose=0)[0][0])
 
-def calculate_severity(img_path, threshold=127):
+def crack_severity(img_path, thresh_val):
     gray = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
-    blur = cv2.GaussianBlur(gray,(5,5),0)
-    _, thresh = cv2.threshold(blur, threshold, 255, cv2.THRESH_BINARY_INV)
-    severity = (np.sum(thresh == 255) / thresh.size) * 100
-    return round(severity,2), thresh
+    blur = cv2.GaussianBlur(gray, (5, 5), 0)
 
-def overlay_crack(img_path, mask):
+    _, thresh = cv2.threshold(
+        blur, thresh_val, 255, cv2.THRESH_BINARY_INV
+    )
+
+    crack_pixels = np.sum(thresh == 255)
+    severity = (crack_pixels / thresh.size) * 100
+
+    return round(severity, 3), thresh
+
+def edge_strength(img_path):
+    gray = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
+    edges = cv2.Canny(gray, 50, 150)
+    edge_ratio = np.sum(edges > 0) / edges.size
+    return edge_ratio
+
+def overlay_crack(img_path, thresh):
     img = cv2.imread(img_path)
     overlay = img.copy()
-    overlay[mask == 255] = [0,0,255]
+    overlay[thresh == 255] = [0, 0, 255]
     return cv2.cvtColor(overlay, cv2.COLOR_BGR2RGB)
 
-def speak(text):
-    tts = gTTS(text=text)
-    tts.save("result.mp3")
-    return "result.mp3"
-
-def generate_pdf(df):
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("Arial", size=12)
-    pdf.cell(0,10,"Concrete Crack Detection Report", ln=True, align="C")
-    pdf.ln(5)
-
-    for _, row in df.iterrows():
-        pdf.multi_cell(0,8,
-            f"Image: {row['Image']}\n"
-            f"Result: {row['Result']}\n"
-            f"CNN Score: {row['CNN Score']}\n"
-            f"Severity (%): {row['Severity (%)']}\n"
-            f"Severity Level: {row['Severity Level']}\n"
-            f"Recommendation: {row['Recommendation']}\n"
-            "----------------------------------------"
-        )
-
-    pdf.output("crack_report.pdf")
-    return "crack_report.pdf"
-
-# -------------------------------
+# -------------------------
 # USER INPUT
-threshold = st.slider("Binary Threshold", 80, 200, 127)
-files = st.file_uploader("Upload Crack Images", type=["jpg","png","jpeg"], accept_multiple_files=True)
+threshold_val = st.slider("Binary Threshold", 80, 200, 130)
+uploaded_files = st.file_uploader(
+    "Upload Image(s)", type=["jpg", "png", "jpeg"], accept_multiple_files=True
+)
 
 results = []
 
-# -------------------------------
+# -------------------------
 # PROCESS IMAGES
-if files:
-    for file in files:
+if uploaded_files:
+    for file in uploaded_files:
         img = Image.open(file)
         path = f"temp_{file.name}"
         img.save(path)
 
         cnn_score = cnn_predict(path)
-        severity, mask = calculate_severity(path, threshold)
+        severity, thresh = crack_severity(path, threshold_val)
+        edge_ratio = edge_strength(path)
 
-        # -------------------------------
-        # BALANCED DECISION LOGIC (FINAL)
-        if severity < 0.3 and cnn_score < 0.6:
+        # -------------------------
+        # FINAL CORRECT DECISION LOGIC
+        if cnn_score < 0.65 and severity < 0.8 and edge_ratio < 0.01:
             decision = "No Crack"
             severity_level = "None"
             recommendation = "Structure is safe"
+            show_overlay = False
         else:
             decision = "Crack Detected"
+            show_overlay = True
 
-            if severity < 1:
+            if severity < 1.5:
                 severity_level = "Low"
                 recommendation = "Monitor periodically"
             elif severity < 5:
@@ -111,40 +102,43 @@ if files:
                 severity_level = "High"
                 recommendation = "Immediate maintenance required"
 
-        # -------------------------------
-        # VISUALIZATION (ONLY IF CRACK)
-        if decision == "Crack Detected":
-            overlay = overlay_crack(path, mask)
+        # -------------------------
+        # DISPLAY
+        st.subheader(file.name)
+        col1, col2 = st.columns(2)
+
+        col1.image(img, caption="Original Image", use_column_width=True)
+
+        if show_overlay:
+            overlay = overlay_crack(path, thresh)
+            col2.image(overlay, caption="Crack Visualization", use_column_width=True)
         else:
-            overlay = np.array(img)
+            col2.image(img, caption="No Crack Detected", use_column_width=True)
 
-        audio = speak(decision)
+        if decision == "Crack Detected":
+            st.error(f"Result: {decision}")
+        else:
+            st.success(f"Result: {decision}")
 
-        # SAVE RESULT
+        st.info(f"Severity Level: {severity_level}")
+        st.write(f"🔍 CNN Score: **{round(cnn_score, 3)}**")
+        st.write(f"📏 Crack Area (%): **{severity}**")
+        st.write(f"📐 Edge Strength: **{round(edge_ratio, 4)}**")
+        st.write(f"🛠 Recommendation: **{recommendation}**")
+        st.divider()
+
         results.append({
             "Image": file.name,
             "Result": decision,
-            "CNN Score": round(cnn_score,2),
-            "Severity (%)": severity,
+            "CNN Score": round(cnn_score, 3),
+            "Crack Area (%)": severity,
+            "Edge Ratio": round(edge_ratio, 4),
             "Severity Level": severity_level,
             "Recommendation": recommendation
         })
 
-        # DISPLAY
-        st.subheader(file.name)
-        col1, col2 = st.columns(2)
-        col1.image(img, caption="Original Image", use_column_width=True)
-        col2.image(overlay, caption="Crack Visualization", use_column_width=True)
-
-        st.success(f"Result: {decision}")
-        st.info(f"Severity Level: {severity_level}")
-        st.progress(min(severity/10, 1.0))
-        st.warning(f"Recommendation: {recommendation}")
-        st.audio(audio)
-        st.divider()
-
-# -------------------------------
-# SUMMARY & DOWNLOADS
+# -------------------------
+# SUMMARY REPORT
 if results:
     df = pd.DataFrame(results)
     st.subheader("📊 Detection Summary")
@@ -153,15 +147,6 @@ if results:
     st.download_button(
         "📥 Download CSV Report",
         df.to_csv(index=False).encode("utf-8"),
-        "crack_report.csv",
-        "text/csv"
+        file_name="crack_detection_report.csv",
+        mime="text/csv"
     )
-
-    pdf_file = generate_pdf(df)
-    with open(pdf_file, "rb") as f:
-        st.download_button(
-            "📄 Download PDF Report",
-            f,
-            "crack_report.pdf",
-            "application/pdf"
-        )
