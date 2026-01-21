@@ -34,14 +34,6 @@ def cnn_predict(img_path):
     arr = np.expand_dims(np.array(img) / 255.0, axis=0)
     return float(model.predict(arr)[0][0])
 
-def cnn_level(score):
-    if score < 0.40:
-        return "Low"
-    elif score < 0.70:
-        return "Medium"
-    else:
-        return "High"
-
 def crack_severity(img_path):
     gray = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
     blur = cv2.GaussianBlur(gray, (5, 5), 0)
@@ -75,18 +67,24 @@ if uploaded_file:
 
     # Predictions
     cnn_score = cnn_predict(temp_path)
-    cnn_confidence = cnn_level(cnn_score)
     severity, thresh = crack_severity(temp_path)
     edge_val = edge_ratio(temp_path)
 
     # -----------------------------
-    # FINAL DECISION LOGIC
+    # FINAL DECISION LOGIC (VERY IMPORTANT)
 
-    if severity < 0.2 and cnn_score < 0.40:
+    if severity < 0.2:
         decision = "No Crack"
         severity_level = "None"
         recommendation = "Structure is safe"
         show_overlay = False
+
+    elif cnn_score < 0.65 and edge_val < 0.01:
+        decision = "No Crack"
+        severity_level = "None"
+        recommendation = "Structure is safe"
+        show_overlay = False
+
     else:
         decision = "Crack Detected"
         show_overlay = True
@@ -121,6 +119,6 @@ if uploaded_file:
         st.success(f"Result: {decision}")
 
     st.info(f"Severity Level: {severity_level}")
-    st.write(f"🤖 CNN Confidence: {cnn_confidence} ({round(cnn_score*100, 2)}%)")
+    st.write(f"🔍 CNN Score: {round(cnn_score, 3)}")
     st.write(f"📏 Crack Area (%): {severity}")
     st.write(f"🛠 Recommendation: {recommendation}")
