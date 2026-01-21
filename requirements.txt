@@ -4,5 +4,3 @@ opencv-python==4.8.1.78
 gdown==4.7.1
 Pillow==10.1.0
 tensorflow==2.14.0
-reportlab==4.0.5
-gTTS==2.3.2
