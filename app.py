@@ -93,8 +93,8 @@ if files:
         severity, mask = calculate_severity(path, threshold)
 
         # -------------------------------
-        # HARD GATE DECISION (FIXED)
-        if cnn_score < 0.75 or severity < 0.3:
+        # BALANCED DECISION LOGIC (FINAL)
+        if severity < 0.3 and cnn_score < 0.6:
             decision = "No Crack"
             severity_level = "None"
             recommendation = "Structure is safe"
@@ -112,7 +112,7 @@ if files:
                 recommendation = "Immediate maintenance required"
 
         # -------------------------------
-        # VISUALIZATION FIX
+        # VISUALIZATION (ONLY IF CRACK)
         if decision == "Crack Detected":
             overlay = overlay_crack(path, mask)
         else:
@@ -138,6 +138,7 @@ if files:
 
         st.success(f"Result: {decision}")
         st.info(f"Severity Level: {severity_level}")
+        st.progress(min(severity/10, 1.0))
         st.warning(f"Recommendation: {recommendation}")
         st.audio(audio)
         st.divider()
