@@ -12,12 +12,12 @@ import warnings
 
 warnings.filterwarnings("ignore")
 
-# --------------------------------
+# -------------------------------
 # PAGE CONFIG
 st.set_page_config(page_title="Concrete Crack Detection", layout="wide")
-st.title("Crack Detection System")
+st.title("🧠 AI-Based Concrete Crack Detection System")
 
-# --------------------------------
+# -------------------------------
 # MODEL DOWNLOAD & LOAD
 MODEL_URL = "https://drive.google.com/uc?export=download&id=1nz82zuEBc0y5rcj9X7Uh5YDvv05VkZuc"
 MODEL_PATH = "crack_model.h5"
@@ -28,7 +28,7 @@ if not os.path.exists(MODEL_PATH):
 
 model = load_model(MODEL_PATH, compile=False)
 
-# --------------------------------
+# -------------------------------
 # FUNCTIONS
 def cnn_predict(img_path):
     img = Image.open(img_path).convert("RGB").resize((150,150))
@@ -74,13 +74,15 @@ def generate_pdf(df):
     pdf.output("crack_report.pdf")
     return "crack_report.pdf"
 
-# --------------------------------
-# UPLOAD
+# -------------------------------
+# USER INPUT
 threshold = st.slider("Binary Threshold", 80, 200, 127)
 files = st.file_uploader("Upload Crack Images", type=["jpg","png","jpeg"], accept_multiple_files=True)
 
 results = []
 
+# -------------------------------
+# PROCESS IMAGES
 if files:
     for file in files:
         img = Image.open(file)
@@ -90,9 +92,9 @@ if files:
         cnn_score = cnn_predict(path)
         severity, mask = calculate_severity(path, threshold)
 
-        # --------------------------------
-        # DECISION + SEVERITY LEVEL
-        if cnn_score < 0.6:
+        # -------------------------------
+        # HARD GATE (FIXED LOGIC)
+        if cnn_score < 0.75 or severity < 0.3:
             decision = "No Crack"
             severity_level = "None"
             recommendation = "Structure is safe"
@@ -124,9 +126,35 @@ if files:
 
         # DISPLAY
         st.subheader(file.name)
-        c1, c2 = st.columns(2)
-        c1.image(img, caption="Original Image", use_column_width=True)
-        c2.image(overlay, caption="Crack Highlighted", use_column_width=True)
+        col1, col2 = st.columns(2)
+        col1.image(img, caption="Original Image", use_column_width=True)
+        col2.image(overlay, caption="Crack Highlighted", use_column_width=True)
 
         st.success(f"Result: {decision}")
         st.info(f"Severity Level: {severity_level}")
+        st.warning(f"Recommendation: {recommendation}")
+        st.audio(audio)
+        st.divider()
+
+# -------------------------------
+# SUMMARY & DOWNLOADS
+if results:
+    df = pd.DataFrame(results)
+    st.subheader("📊 Detection Summary")
+    st.dataframe(df)
+
+    st.download_button(
+        "📥 Download CSV Report",
+        df.to_csv(index=False).encode("utf-8"),
+        "crack_report.csv",
+        "text/csv"
+    )
+
+    pdf_file = generate_pdf(df)
+    with open(pdf_file, "rb") as f:
+        st.download_button(
+            "📄 Download PDF Report",
+            f,
+            "crack_report.pdf",
+            "application/pdf"
+        )
