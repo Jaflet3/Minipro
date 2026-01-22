@@ -45,10 +45,10 @@ model = load_model()
 # -----------------------------
 # UI
 # -----------------------------
-st.title("🧱 Concrete Crack Detection")
+st.title("🧱 Concrete Crack Detection System")
 
 uploaded_file = st.file_uploader(
-    "Upload concrete image",
+    "Upload concrete surface image",
     type=["jpg", "jpeg", "png"]
 )
 
