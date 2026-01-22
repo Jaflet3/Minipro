@@ -5,27 +5,39 @@ import requests
 from PIL import Image
 import tensorflow as tf
 
-st.set_page_config(page_title="Crack Detection", layout="wide")
+# -----------------------------
+# PAGE CONFIG
+# -----------------------------
+st.set_page_config(
+    page_title="Concrete Crack Detection",
+    page_icon="🧱",
+    layout="wide"
+)
+
+st.title("🧱 Concrete Crack Detection System")
+st.caption("CNN-based Structural Health Monitoring")
 
 # -----------------------------
-# DOWNLOAD MODEL FROM DRIVE
+# GOOGLE DRIVE MODEL DOWNLOAD
 # -----------------------------
-MODEL_FILE = "crack_model.h5"
+MODEL_PATH = "crack_model.h5"
 FILE_ID = "1nz82zuEBc0y5rcj9X7Uh5YDvv05VkZuc"
 
-def download_from_gdrive(file_id, destination):
+def download_model(file_id, destination):
     URL = "https://docs.google.com/uc?export=download"
     session = requests.Session()
-    response = session.get(URL, params={'id': file_id}, stream=True)
+    response = session.get(URL, params={"id": file_id}, stream=True)
 
     token = None
-    for k, v in response.cookies.items():
-        if k.startswith("download_warning"):
-            token = v
+    for key, value in response.cookies.items():
+        if key.startswith("download_warning"):
+            token = value
 
     if token:
         response = session.get(
-            URL, params={'id': file_id, 'confirm': token}, stream=True
+            URL,
+            params={"id": file_id, "confirm": token},
+            stream=True,
         )
 
     with open(destination, "wb") as f:
@@ -34,21 +46,19 @@ def download_from_gdrive(file_id, destination):
                 f.write(chunk)
 
 @st.cache_resource
-def load_model():
-    if not os.path.exists(MODEL_FILE):
-        with st.spinner("📥 Downloading model..."):
-            download_from_gdrive(FILE_ID, MODEL_FILE)
-    return tf.keras.models.load_model(MODEL_FILE)
+def load_crack_model():
+    if not os.path.exists(MODEL_PATH):
+        with st.spinner("📥 Downloading CNN model..."):
+            download_model(FILE_ID, MODEL_PATH)
+    return tf.keras.models.load_model(MODEL_PATH)
 
-model = load_model()
+model = load_crack_model()
 
 # -----------------------------
-# UI
+# IMAGE UPLOAD
 # -----------------------------
-st.title("🧱 Concrete Crack Detection System")
-
 uploaded_file = st.file_uploader(
-    "Upload concrete surface image",
+    "📤 Upload Concrete Surface Image",
     type=["jpg", "jpeg", "png"]
 )
 
@@ -56,15 +66,20 @@ if uploaded_file:
     image = Image.open(uploaded_file).convert("RGB")
     st.image(image, caption="Uploaded Image", use_column_width=True)
 
+    # Preprocessing
     img = image.resize((150, 150))
     arr = np.array(img) / 255.0
     arr = np.expand_dims(arr, axis=0)
 
-    pred = model.predict(arr, verbose=0)[0][0]
+    # Prediction
+    prediction = model.predict(arr, verbose=0)[0][0]
 
-    st.subheader("Result")
+    st.divider()
+    st.subheader("📊 Result")
 
-    if pred > 0.5:
-        st.error(f"⚠️ Crack Detected ({pred*100:.2f}%)")
+    if prediction >= 0.5:
+        st.error(f"⚠️ Crack Detected\n\nConfidence: {prediction*100:.2f}%")
+        st.info("🛠 Recommendation: Inspection and repair advised")
     else:
-        st.success(f"✅ No Crack Detected ({(1-pred)*100:.2f}%)")
+        st.success(f"✅ No Crack Detected\n\nConfidence: {(1-prediction)*100:.2f}%")
+        st.info("🧱 Structure appears safe")
