@@ -22,12 +22,13 @@ st.caption("Hybrid CNN + Image Processing based Structural Health Monitoring")
 st.divider()
 
 # -----------------------------
-# LOAD MODEL FROM HUGGING FACE
+# LOAD MODEL (HUGGING FACE - FIXED)
 @st.cache_resource
 def load_crack_model():
     model_path = hf_hub_download(
-        repo_id="Jaflet/crack_model",
-        filename="crack_model.h5"
+        repo_id="Jaflet/crack_model",   # ✅ EXACT repo
+        filename="crack_model.h5",      # ✅ EXACT filename
+        repo_type="model"
     )
     return load_model(model_path, compile=False)
 
@@ -63,7 +64,7 @@ def edge_ratio(img_path):
 def overlay_crack(img_path, thresh):
     img = cv2.imread(img_path)
     overlay = img.copy()
-    overlay[thresh == 255] = [0, 0, 255]  # Red crack overlay
+    overlay[thresh == 255] = [0, 0, 255]  # red overlay
     return cv2.cvtColor(overlay, cv2.COLOR_BGR2RGB)
 
 # -----------------------------
@@ -113,9 +114,17 @@ if uploaded_file:
 
     if show_overlay:
         overlay_img = overlay_crack(temp_path, thresh)
-        col2.image(overlay_img, caption="Detected Crack Area", use_column_width=True)
+        col2.image(
+            overlay_img,
+            caption="Detected Crack Area",
+            use_column_width=True
+        )
     else:
-        col2.image(img, caption="No Crack Found", use_column_width=True)
+        col2.image(
+            img,
+            caption="No Crack Found",
+            use_column_width=True
+        )
 
     st.divider()
 
@@ -136,6 +145,8 @@ if uploaded_file:
     else:
         st.success("✅ Result: No Crack Detected")
 
+    # -----------------------------
+    # SEVERITY & RECOMMENDATION
     st.info(f"🧱 Severity Level: **{severity_level}**")
     st.write(f"🛠 **Recommendation:** {recommendation}")
 
@@ -143,8 +154,8 @@ if uploaded_file:
     # TECHNICAL EXPLANATION
     with st.expander("ℹ️ How this decision was made"):
         st.write("""
-        - CNN detects texture-level cracks (including micro cracks)
-        - Crack Area measures pixel-level damage
+        - CNN detects texture-level cracks (including micro-cracks)
+        - Crack Area measures pixel-level crack coverage
         - Edge Density validates structural discontinuities
         - Final decision is based on hybrid intelligence
         """)
